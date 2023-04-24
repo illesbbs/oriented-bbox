@@ -1,0 +1,156 @@
+int numpt = npoints(0);
+int iter = chi("iterations");
+
+//min & max y positions
+vector minpos, maxpos;
+getbbox(0, minpos, maxpos);
+float miny = minpos.y;
+float maxy = maxpos.y - minpos.y;
+
+//intersection point of a line and a perpendicular ray from a point
+vector get_intersection_pos(vector n; vector pt_A; vector pt_B){
+    vector nn = cross(n, {0,1,0});
+    float Ax = pt_A.x;
+    float Az = pt_A.z;
+    float Bx = pt_B.x;
+    float Bz = pt_B.z;
+    float constant1 = nn.x * Ax + nn.z * Az;
+    float constant2 = n.x * Bx + n.z * Bz;
+    matrix2 A = set(nn.x, nn.z, n.x, n.z);
+    vector2 x;
+    vector2 B = set(constant1, constant2);
+    x = B * invert(A);
+    vector fin_pos = set(x.u, 0, x.v);
+    return fin_pos;
+}
+
+//this function calculates the shortest distance between 'p' and the line that is defined by the vector 'n' and the origin   
+float get_dist_from_edge(vector p; vector n){ 
+    float x, z; //x and z coordinates of the closest point on the line
+    float A = p.x;
+    float B = p.z;
+    x = (pow(n.z, 2) * A - n.z * n.x * B) / (pow(n.z, 2) + pow(n.x, 2)); 
+    z = (pow(n.x, 2) * B - n.z * n.x * A) / (pow(n.z, 2) + pow(n.x, 2));
+    vector P = set(A, 0, B);
+    vector M = set(x, 0, z);
+    float multiplier = -1;
+    vector Mdir = normalize(P-M);
+    if(dot(Mdir, n) < 0.1){
+        multiplier = 1;
+    }
+    float dist = multiplier * distance(M, P);
+    
+    return dist;
+}
+
+//setting base parameters
+float min_n;
+float max_n;
+float min_v;
+float max_v;
+float minarea;
+
+//creating dictionary
+dict pt_data;
+dict rect_pts = set("minpt_n", 0, "maxpt_n", 0, "minpt_v", 0, "maxpt_v", 0);
+dict smallest = set("iteration", 0, "minarea", 0, "rect_pts", 0, "n", 0, "v", 0);
+
+for(int i = 0; i < iter; i++){
+    float x_dir = (90.0 / float(iter)) * i;
+    vector n = normalize(set(sin(radians(x_dir)), 0, cos(radians(x_dir))));
+    vector v = cross({0,1,0}, n);
+    float area;
+    
+    //loop over each points in the geometry to find the furthest points in n and v direction
+    for(int j = 0; j < numpt; j++){
+        vector curpt = point(0, 'P', j);
+        float d1 = get_dist_from_edge(curpt, n);
+        float d2 = get_dist_from_edge(curpt, v);
+        if(j == 0){
+            min_n = d1;
+            max_n = d1;
+            min_v = d2;
+            max_v = d2;
+        }
+            
+        pt_data[itoa(j)]["pos"] = vector(curpt);
+        pt_data[itoa(j)]["mindist"] = float(min(d2, d1));
+        pt_data[itoa(j)]["maxdist"] = float(max(d1, d2));       
+        
+        int minpt_n = 0; //ptnum of the point with the smallest distance in n direction;
+        if(d1 < min_n){
+            rect_pts["minpt_n"] = j;
+            min_n = d1;
+        }
+        
+        int maxpt_n = 0;
+        if(d1 > max_n){
+            rect_pts["maxpt_n"] = j;
+            max_n = d1;
+        }
+        
+        int minpt_v = 0;
+        if(d2 < min_v){
+            rect_pts["minpt_v"] = j;
+            min_v = d2;
+        }
+        
+        int maxpt_v = 0;
+        if(d2 > max_v){
+            rect_pts["maxpt_v"] = j;
+            max_v = d2;
+        }
+    }
+    
+    area = abs((max_n - min_n) * (max_v - min_v));
+    
+    if(i == 0){
+        minarea = area;
+        smallest["iteratrion"] = 0;
+        smallest["minarea"] = minarea;
+        smallest["rect_pts"] = rect_pts;
+        smallest["n"] = n;
+        smallest["v"] = v;
+    }
+    
+    if(area < minarea){
+        minarea = area;
+        smallest["iteration"] = i;
+        smallest["minarea"] = minarea;
+        smallest["rect_pts"] = rect_pts;
+        smallest["n"] = n;
+        smallest["v"] = v;    
+    }
+    
+}
+
+//calculated farthest points
+vector P0 = point(0, "P", smallest["rect_pts"]['maxpt_n']); 
+vector Q0 = point(0, "P", smallest["rect_pts"]['maxpt_v']);
+vector R0 = point(0, "P", smallest["rect_pts"]['minpt_n']);
+vector S0 = point(0, "P", smallest["rect_pts"]['minpt_v']); 
+
+//bbox corner points
+vector P = get_intersection_pos(smallest["v"], P0, Q0);
+vector Q = get_intersection_pos(smallest["n"], Q0, R0);
+vector R = get_intersection_pos(smallest["v"], R0, S0);
+vector S = get_intersection_pos(smallest["n"], S0, P0);
+
+P.y = miny;
+Q.y = miny;
+R.y = miny;
+S.y = miny;
+
+//add corner points to geo
+int pt_p = addpoint(0, P);
+int pt_q = addpoint(0, Q);
+int pt_r = addpoint(0, R);
+int pt_s = addpoint(0, S);
+
+setpointgroup(0, "bbox", pt_p, 1, 'set');
+setpointgroup(0, "bbox", pt_q, 1, 'set');
+setpointgroup(0, "bbox", pt_r, 1, 'set');
+setpointgroup(0, "bbox", pt_s, 1, 'set');
+
+setdetailattrib(0, 'minimum_area', minarea, 'set');
+setdetailattrib(0, 'maxy', maxy, 'set');
